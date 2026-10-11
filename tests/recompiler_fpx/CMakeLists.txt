@@ -12,7 +12,8 @@ set(gen "${CMAKE_CURRENT_BINARY_DIR}/gen")
 set(gen_files "${gen}/rt_soft.h" "${gen}/rt_soft.c" "${gen}/ops_soft.c" "${gen}/hw.c"
     "${gen}/rt_fpx.h" "${gen}/ops_fpx.c" "${gen}/rt_nokeep.h" "${gen}/ops_nokeep.c"
     "${gen}/rt_nomid.h" "${gen}/ops_nomid.c" "${gen}/rt_shadow.h" "${gen}/ops_shadow.c"
-    "${gen}/shadow_rt.c")
+    "${gen}/shadow_rt.c" "${gen}/exact_rt.c" "${gen}/outline_soft.c"
+    "${gen}/outline_fpx.c" "${gen}/outline_ops.h")
 add_custom_command(OUTPUT ${gen_files} COMMAND fpx_gen "${gen}" DEPENDS fpx_gen VERBATIM)
 
 # The runtime as the static host builds it, for recomp_fp_estimate.
@@ -21,7 +22,7 @@ target_include_directories(fpx_runtime PRIVATE "${gen}")
 target_compile_definitions(fpx_runtime PRIVATE SUYU_HOSTED_RECOMP=1 RECOMP_STATIC_HOST=1)
 
 set(driver_sources driver.c fpx_env.cpp "${gen}/ops_soft.c" "${gen}/ops_fpx.c"
-    "${gen}/ops_nokeep.c" "${gen}/ops_nomid.c" "${gen}/ops_shadow.c" "${gen}/shadow_rt.c")
+    "${gen}/ops_nokeep.c" "${gen}/ops_nomid.c" "${gen}/ops_shadow.c" "${gen}/shadow_rt.c" "${gen}/exact_rt.c")
 # fpx_env.cpp: the host's own FP-mode check (core/arm/recomp/guest_fp_env.h).
 set(driver_defs FPX_HAVE_FPX=1 FPX_HAVE_ENV=1)
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64|ARM64)$" AND NOT MSVC)
@@ -41,3 +42,15 @@ else()
 endif()
 separate_arguments(fpx_extra NATIVE_COMMAND "${FPX_EXTRA_C_FLAGS}")
 target_compile_options(fpx_driver PRIVATE "$<$<COMPILE_LANGUAGE:C>:${fpx_extra}>")
+
+add_executable(fpx_outline_alias outline_alias.c fpx_env.cpp
+    "${gen}/outline_soft.c" "${gen}/outline_fpx.c" "${gen}/exact_rt.c")
+target_include_directories(fpx_outline_alias PRIVATE "${gen}" "${SUYU_SOURCE}/src")
+target_compile_features(fpx_outline_alias PRIVATE c_std_11 cxx_std_20)
+if(MSVC)
+  target_compile_options(fpx_outline_alias PRIVATE /bigobj /fp:precise)
+else()
+  target_compile_options(fpx_outline_alias PRIVATE -fno-fast-math)
+  target_link_libraries(fpx_outline_alias PRIVATE m)
+endif()
+target_compile_options(fpx_outline_alias PRIVATE "$<$<COMPILE_LANGUAGE:C>:${fpx_extra}>")

@@ -103,6 +103,7 @@ def main():
         call([args.cmake, "-S", test_source, "-B", build, *options])
         call([args.cmake, "--build", build, "--config", "Release", "--parallel", str(args.jobs)])
         driver = driver_path(build)
+        call([driver.with_name("fpx_outline_alias" + driver.suffix)])
         logs = Path(tmp)
         common = ["--cases", str(args.cases), "--adv", str(args.adv), "--l4-step", str(args.l4_step)]
         status = 0

@@ -18,12 +18,15 @@ ABI5_GOLDEN = "79c6670cdbda8d52600ff5e53ee7bd1982455dcb635f72cffdb8c924f0825a95"
 # exactness fixes touch the shared emitter and so this text too; GG1's own
 # switch-off contract (DESIGN.md sec 0) guarantees it does not move these.
 FM1_GOLDEN = "d1ef5cbec953fce3bfb5ddfcf7fd2032d6bfa147f9902bfa0ffb3ac139a6a004"
-FPX_GOLDEN = "565d78a55c5d3a1c5b0cdb52c88afb35184cd9467327c478324b05945e844d96"
+# FPX1 shares the unchanged exact FP32 add/sub/mul bodies in its runtime;
+# the ABI 5 and FM1-only golden trees above remain byte-identical.
+FPX_GOLDEN = "bcd3db15a9b92e65565315b41ef0a0d55ead1df2fe568611e4be1d24e692e079"
 
 # ABI 6 changes only these files; the block sources must be identical.
 ABI6_CHANGED = {"CMakeLists.txt", "recomp_export.c", "recomp_runtime.c", "recomp_runtime.h"}
-# FPX1 on top of FM1 changes only these: the smoke code has no FP instructions.
-FPX_CHANGED = {"CMakeLists.txt", "recomp_export.c", "recomp_runtime.h"}
+# FPX1 on top of FM1 adds its header and shared exact FP32 fallbacks, even
+# though the smoke code itself has no FP instructions.
+FPX_CHANGED = {"CMakeLists.txt", "recomp_export.c", "recomp_runtime.h", "recomp_runtime.c"}
 # GG1 (the generation code guard) changes the block units as well, never the
 # dispatch table (src/recompiled_<module>.c) or the file set.
 GG1_CHANGED = ABI6_CHANGED | {"recompiled_smoke_0.c", "recompiled_second_0.c"}

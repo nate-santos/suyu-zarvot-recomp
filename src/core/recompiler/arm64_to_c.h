@@ -502,9 +502,8 @@ inline std::string EmitFPNativeSuffix(bool dbl, const char* op) {
     return "}while(0);";
 }
 
-inline std::string EmitFPAddSubValue(bool dbl, bool subtract) {
-    return EmitFPNativeValue(dbl, subtract ? "sub" : "add") +
-        "{ const unsigned _f=" + std::string(dbl?"52":"23") +
+inline std::string EmitFPAddSubExactValue(bool dbl, bool subtract) {
+    return "{ const unsigned _f=" + std::string(dbl?"52":"23") +
         ";const uint64_t _hidden=1ULL<<_f,_frac=_hidden-1,_quiet=_hidden>>1,_exp="+
         (dbl?"0x7ff0000000000000ULL":"0x7f800000ULL")+",_sign="+
         (dbl?"0x8000000000000000ULL":"0x80000000ULL")+";"
@@ -538,7 +537,18 @@ inline std::string EmitFPAddSubValue(bool dbl, bool subtract) {
         "if(_rounded>=(_hidden<<1)){_rounded>>=1;++_ea;}"
         "if(_ea>=(unsigned)(_exp>>_f)){c->fpsr|=20;_v=(_mode==0||(_mode==1&&!_sa)||(_mode==2&&_sa))?_exp:_exp-1;}"
         "else _v=((_rounded>=_hidden?(uint64_t)_ea:0)<<_f)|(_rounded&_frac);}"
-        "if(_sa)_v|=_sign;}}}" + EmitFPNativeSuffix(dbl, subtract ? "sub" : "add");
+        "if(_sa)_v|=_sign;}}}";
+}
+
+inline std::string EmitFPAddSubValue(bool dbl, bool subtract) {
+    const char* op = subtract ? "sub" : "add";
+    // Keep the per-lane native gate inline, but share its exact fallback.
+    // Large side-entry blocks otherwise duplicate hundreds of soft FP bodies
+    // and their stack temporaries even when the native path is taken.
+    const std::string exact = g_emit_fpx && !dbl
+        ? std::string("_v=recomp_fp_") + op + "32_exact(c,_a,_b);"
+        : EmitFPAddSubExactValue(dbl, subtract);
+    return EmitFPNativeValue(dbl, op) + exact + EmitFPNativeSuffix(dbl, op);
 }
 
 // Generated exact product/addend lattice. Inputs _a,_b,_z and output _v are
@@ -657,9 +667,8 @@ else {
 
 // `mul` marks a multiply (FMUL/FNMUL), whose addend is the sign-matched zero
 // the caller supplies: the fast path then needs no fused multiply-add.
-inline std::string EmitFPMulAddValue(bool dbl, bool mul = false) {
-    std::string s=EmitFPNativeValue(dbl, mul ? "mul" : "fma")+
-        "{ const unsigned _f="+std::string(dbl?"52":"23")+
+inline std::string EmitFPMulAddExactValue(bool dbl) {
+    std::string s="{ const unsigned _f="+std::string(dbl?"52":"23")+
         ",_bias="+(dbl?"1023":"127")+",_count="+(dbl?"67":"9")+
         "; const int _base="+(dbl?"-2148":"-298")+"; uint64_t _p["+
         (dbl?"67":"9")+"]={0},_c["+(dbl?"67":"9")+"]={0};";
@@ -723,8 +732,17 @@ else {
 }
 }
 )C";
-    s += EmitFPNativeSuffix(dbl, mul ? "mul" : "fma");
     return s;
+}
+
+inline std::string EmitFPMulAddValue(bool dbl, bool mul = false) {
+    const char* op = mul ? "mul" : "fma";
+    // The caller supplies the same sign-matched zero addend as the inline
+    // multiply body. Fused forms and binary64 retain their existing spelling.
+    const std::string exact = g_emit_fpx && !dbl && mul
+        ? "_v=recomp_fp_mul32_exact(c,_a,_b,_z);"
+        : EmitFPMulAddExactValue(dbl);
+    return EmitFPNativeValue(dbl, op) + exact + EmitFPNativeSuffix(dbl, op);
 }
 
 // FRECPS/FRSQRTS S/D, evaluated exactly before one rounding: 2 - a*b, or
@@ -6626,6 +6644,28 @@ static RECOMP_INLINE int recomp_fpx_sqrt64(uint64_t a, uint64_t* v) {
 )RT";
 }
 
+// Shared exact binary32 fallbacks for FPX1. Their arithmetic text is the same
+// emitter text the ABI 5 path puts inline; only the function boundary differs.
+// Do not mark these cold: some compilers split a cold fragment out of every
+// caller, undoing the footprint saving. Explicit noinline keeps one copy.
+inline const char* FpxExactRuntimeH() {
+    return "uint64_t recomp_fp_add32_exact(GuestContext*,uint64_t,uint64_t);\n"
+           "uint64_t recomp_fp_sub32_exact(GuestContext*,uint64_t,uint64_t);\n"
+           "uint64_t recomp_fp_mul32_exact(GuestContext*,uint64_t,uint64_t,uint64_t);\n";
+}
+
+inline std::string FpxExactRuntimeC() {
+    std::string text;
+    for (const bool subtract : {false, true}) {
+        text += std::string("\nRECOMP_NOINLINE uint64_t recomp_fp_") + (subtract ? "sub" : "add") +
+                "32_exact(GuestContext* c,uint64_t _a,uint64_t _b){\nuint64_t _v=0;\n" +
+                EmitFPAddSubExactValue(false, subtract) + "\nreturn _v;\n}\n";
+    }
+    text += "\nRECOMP_NOINLINE uint64_t recomp_fp_mul32_exact(GuestContext* c,uint64_t _a,uint64_t _b,uint64_t _z){\n"
+            "uint64_t _v=0;\n" + EmitFPMulAddExactValue(false) + "\nreturn _v;\n}\n";
+    return text;
+}
+
 // Instrumentation only (g_emit_fpx_shadow): the runtime half of the shadow
 // build. Per kind (op*2 + double) it counts calls, open gates, kept fast
 // results and mismatches against the exact body, which runs anyway; the first
@@ -6964,7 +7004,7 @@ int  recomp_load_segments(GuestContext* c, const char* data_dir);
         // After GuestContext, before the include guard closes.
         static constexpr std::string_view guard_end = "#endif\n";
         const size_t at = text.rfind(guard_end);
-        text.insert(at, std::string(FpxH()) + FpxH64() +
+        text.insert(at, std::string(FpxH()) + FpxH64() + FpxExactRuntimeH() +
                             (fpx == 2 ? "/* FPX1 shadow instrumentation build (never timed). */\n"
                                         "void recomp_fpx_shadow(unsigned kind, int gate, int kept, uint64_t fast,\n"
                                         "    uint64_t exact, uint64_t fpsr_before, uint64_t fpsr_after,\n"
@@ -7888,11 +7928,18 @@ inline const char* RuntimeC() {
     static const std::string abi5 = BuildRuntimeC(false);
     static const std::string fastmem = BuildRuntimeC(true);
     static const std::string guard_gen = BuildRuntimeC(true, true);
-    static const std::string abi5_shadow = abi5 + FpxShadowC();
-    static const std::string fastmem_shadow = fastmem + FpxShadowC();
-    static const std::string guard_gen_shadow = guard_gen + FpxShadowC();
+    static const std::string abi5_fpx = abi5 + FpxExactRuntimeC();
+    static const std::string fastmem_fpx = fastmem + FpxExactRuntimeC();
+    static const std::string guard_gen_fpx = guard_gen + FpxExactRuntimeC();
+    static const std::string abi5_shadow = abi5_fpx + FpxShadowC();
+    static const std::string fastmem_shadow = fastmem_fpx + FpxShadowC();
+    static const std::string guard_gen_shadow = guard_gen_fpx + FpxShadowC();
     if (FpxVariant() == 2) {
         return (EmitGuardGen() ? guard_gen_shadow : g_emit_fastmem ? fastmem_shadow : abi5_shadow)
+            .c_str();
+    }
+    if (FpxVariant() == 1) {
+        return (EmitGuardGen() ? guard_gen_fpx : g_emit_fastmem ? fastmem_fpx : abi5_fpx)
             .c_str();
     }
     return (EmitGuardGen() ? guard_gen : g_emit_fastmem ? fastmem : abi5).c_str();
