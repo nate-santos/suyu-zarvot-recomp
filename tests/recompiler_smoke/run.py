@@ -11,16 +11,19 @@ import tempfile
 # SHA-256 of the whole generated smoke tree (every file, by relative path) with
 # the fast-path emit option off. That output must stay byte-identical to ABI 5;
 # update this only for a deliberate ABI 5 emitter change, never for ABI 6 work.
-ABI5_GOLDEN = "79c6670cdbda8d52600ff5e53ee7bd1982455dcb635f72cffdb8c924f0825a95"
+# The indexed early-NULL lookup is a shared dispatch change: against 84568fcadc,
+# all five variants differ only in src/recompiled_smoke.c and
+# second/src/recompiled_second.c. Runtime, block bodies and feature ABI stay the same.
+ABI5_GOLDEN = "cd439185cde6682abae42044ac36f89960436aabadfe30e521cf1021ebc1853a"
 # The same for ABI 6 with FM1 alone (GG1 and FPX1 both off), which neither
 # feature may move, and with FM1 and FPX1 (exact native FP) on, tracked so any
 # change is deliberate. Recomputed against this integration tree, since the FP
 # exactness fixes touch the shared emitter and so this text too; GG1's own
 # switch-off contract (DESIGN.md sec 0) guarantees it does not move these.
-FM1_GOLDEN = "d1ef5cbec953fce3bfb5ddfcf7fd2032d6bfa147f9902bfa0ffb3ac139a6a004"
+FM1_GOLDEN = "755f6fe443292b6fd474e787c3a1a33730ab0c50c8e69f7e8c1ebbf5b07915e7"
 # FPX1 shares the unchanged exact FP32 add/sub/mul bodies in its runtime;
 # the ABI 5 and FM1-only golden trees above remain byte-identical.
-FPX_GOLDEN = "bcd3db15a9b92e65565315b41ef0a0d55ead1df2fe568611e4be1d24e692e079"
+FPX_GOLDEN = "228ac8bcd52945cfbd75fe18e240c073efd931751997ebffa8e8e737eb5dc351"
 
 # ABI 6 changes only these files; the block sources must be identical.
 ABI6_CHANGED = {"CMakeLists.txt", "recomp_export.c", "recomp_runtime.c", "recomp_runtime.h"}
@@ -148,7 +151,7 @@ def check_coverage_loop(root, exporter, build):
         return out
 
     first = export("loop-1")
-    call([executable(build("run-loop-1", f"-DLOOP_DIR={first}"), "smoke_loop"), "record", gaps])
+    call([executable(build("run-loop-1", f"-DLOOP_DIR={first.as_posix()}"), "smoke_loop"), "record", gaps])
     # No usable gaps must leave the output byte-identical: an empty file, and
     # gaps recorded against another build of the module.
     empty = root / "loop-empty.json"
@@ -162,7 +165,7 @@ def check_coverage_loop(root, exporter, build):
     second = export("loop-2", gaps)
     if tree_hash(second) == tree_hash(first):
         raise RuntimeError("the recorded gap did not reach block discovery")
-    call([executable(build("run-loop-2", f"-DLOOP_DIR={second}"), "smoke_loop"), "static", gaps])
+    call([executable(build("run-loop-2", f"-DLOOP_DIR={second.as_posix()}"), "smoke_loop"), "static", gaps])
     print("Coverage loop checks passed.")
 
 
@@ -185,7 +188,8 @@ def main():
         def build(name, *options):
             directory = root / name
             call([args.cmake, "-S", test_source, "-B", directory,
-                  f"-DSUYU_SOURCE={source}", "-DCMAKE_BUILD_TYPE=Release", *compiler_options,
+                  f"-DSUYU_SOURCE={source.as_posix()}", "-DCMAKE_BUILD_TYPE=Release",
+                  "-DCMAKE_TRY_COMPILE_CONFIGURATION=Release", *compiler_options,
                   *options])
             call([args.cmake, "--build", directory, "--config", "Release", "--parallel", "2"])
             return directory
@@ -210,7 +214,7 @@ def main():
 
         for name, switches in VARIANTS:
             guard_gen = "SUYU_RECOMP_AB_GUARD_GEN" in switches
-            run = build(f"run-{name}", f"-DGENERATED_DIR={generated[name]}")
+            run = build(f"run-{name}", f"-DGENERATED_DIR={generated[name].as_posix()}")
             runner = executable(run, "smoke_run")
             for mode in ("slice", "ordinary-page", "cross-page", "special-page",
                          "mem-ordinary", "mem-unmapped", "mem-special", "mem-cross",
