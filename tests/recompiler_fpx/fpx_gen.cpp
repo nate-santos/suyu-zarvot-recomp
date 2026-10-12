@@ -105,7 +105,11 @@ bool Ops(const std::filesystem::path& dir, const std::string& tag, const std::st
 bool AliasOps(const std::filesystem::path& dir, const std::string& tag, const std::string& header) {
     const unsigned words[] = {
         0x1e222800u, 0x1e202820u, 0x1e203800u, // scalar add/sub, destination aliases
-        0x1e220800u, 0x1e208820u,             // scalar mul/fnmul, destination aliases
+        // Scalar FMUL/FNMUL: distinct operands, either destination alias,
+        // equal sources and all three registers equal. Upper source bits are
+        // deliberately nonzero in the full-context driver.
+        0x1e220820u, 0x1e220800u, 0x1e200820u, 0x1e210820u, 0x1e200800u,
+        0x1e228820u, 0x1e228800u, 0x1e208820u, 0x1e218820u, 0x1e208800u,
         0x4e22d400u, 0x4e20d420u, 0x4ea0d400u, // vector add/sub, either/both sources
         0x6e22dc00u, 0x6e20dc20u,             // vector mul, either source
         0x6e22d400u, 0x7e30d800u,             // pairwise vector/scalar add

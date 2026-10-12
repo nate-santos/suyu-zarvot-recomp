@@ -93,7 +93,8 @@ def main():
     test_source = Path(__file__).resolve().parent
     with tempfile.TemporaryDirectory(prefix="suyu-fpx-") as tmp:
         build = args.build or Path(tmp) / "build"
-        options = [f"-DSUYU_SOURCE={args.source.resolve()}", "-DCMAKE_BUILD_TYPE=Release",
+        options = [f"-DSUYU_SOURCE={args.source.resolve().as_posix()}", "-DCMAKE_BUILD_TYPE=Release",
+                   "-DCMAKE_TRY_COMPILE_CONFIGURATION=Release",
                    f"-DFPX_EXTRA_C_FLAGS={args.cflags}"]
         if args.generator:
             options += ["-G", args.generator]

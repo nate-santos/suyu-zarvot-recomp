@@ -3814,9 +3814,20 @@ inline bool Translate(u32 i, u64 pc, std::string& out, bool* unhandled = nullptr
         const bool negate=(i&0x8000)!=0;
         const bool dbl=(i&(1U<<22))!=0;const unsigned rd=i&31,rn=(i>>5)&31,rm=(i>>16)&31;
         const std::string sz=dbl?"8":"4";
-        put("{uint64_t _a=0,_b=0,_z,_v;memcpy(&_a,c->vreg["+std::to_string(rn)+"],"+sz+
-            ");memcpy(&_b,c->vreg["+std::to_string(rm)+"],"+sz+");_z=(_a^_b)&"+
-            std::string(dbl?"0x8000000000000000ULL":"0x80000000ULL")+";");
+        if(g_emit_fpx&&!dbl&&!divide) {
+            // Match the copy's destination width before widening. MSVC can
+            // otherwise materialize a zeroed uint64_t on the stack, overwrite
+            // its low half, then reload all eight bytes for the exact helper.
+            // memcpy keeps aliasing defined; FPX gates and exact inputs stay
+            // identical. Retain ABI 5, division and binary64 output verbatim.
+            put("{uint32_t _a32,_b32;memcpy(&_a32,c->vreg["+std::to_string(rn)+"],4);"
+                "memcpy(&_b32,c->vreg["+std::to_string(rm)+"],4);"
+                "uint64_t _a=_a32,_b=_b32,_z=(_a^_b)&0x80000000ULL,_v;");
+        } else {
+            put("{uint64_t _a=0,_b=0,_z,_v;memcpy(&_a,c->vreg["+std::to_string(rn)+"],"+sz+
+                ");memcpy(&_b,c->vreg["+std::to_string(rm)+"],"+sz+");_z=(_a^_b)&"+
+                std::string(dbl?"0x8000000000000000ULL":"0x80000000ULL")+";");
+        }
         if(divide)put("(void)_z;");
         put(divide?EmitFPDivideValue(dbl):EmitFPMulAddValue(dbl,true));
         // FNMUL negates the rounded product, including NaN/zero sign. Moving
