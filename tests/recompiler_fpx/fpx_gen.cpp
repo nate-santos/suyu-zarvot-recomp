@@ -104,7 +104,11 @@ bool Ops(const std::filesystem::path& dir, const std::string& tag, const std::st
 
 bool AliasOps(const std::filesystem::path& dir, const std::string& tag, const std::string& header) {
     const unsigned words[] = {
-        0x1e222800u, 0x1e202820u, 0x1e203800u, // scalar add/sub, destination aliases
+        // Scalar FADD/FSUB: distinct operands, either destination alias,
+        // equal sources and all equal. Check the whole destination register,
+        // including clearing the poisoned upper bits on native/exact paths.
+        0x1e222820u, 0x1e222800u, 0x1e202820u, 0x1e212820u, 0x1e202800u,
+        0x1e223820u, 0x1e223800u, 0x1e203820u, 0x1e213820u, 0x1e203800u,
         // Scalar FMUL/FNMUL: distinct operands, either destination alias,
         // equal sources and all three registers equal. Upper source bits are
         // deliberately nonzero in the full-context driver.

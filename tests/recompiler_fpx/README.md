@@ -58,7 +58,7 @@ precision FMA forms have a fast path (x86-64 needs `__FMA__`), so their hit
 rate can be 0 there.
 
 The separate `fpx_outline_alias` executable compares the whole guest context,
-including poisoned upper register bits and unrelated state. Scalar FMUL/FNMUL
-cover distinct operands, either destination alias, equal sources and all three
-registers equal. It requires both native and exact paths to execute. The runner
+including poisoned upper register bits and unrelated state. Scalar FADD/FSUB
+and FMUL/FNMUL cover distinct operands, either destination alias, equal sources
+and all three registers equal. It requires both native and exact paths to execute. The runner
 uses Release compiler probes and normalized CMake source paths on Windows.

@@ -2192,6 +2192,18 @@ inline bool Translate(u32 i, u64 pc, std::string& out, bool* unhandled = nullptr
             const unsigned lanes=scalar||scalar_pair?1:(q?16:8)/(dbl?8:4);
             const bool sub=scalar?(i&0x1000)!=0:vector&&(i&0x800000)!=0;
             const std::string ct=dbl?"uint64_t":"uint32_t",count=dbl?"2":"4";
+            if (g_emit_fpx && scalar && !dbl) {
+                // Scalar S writes zero above bit 31. Store the truncated result
+                // directly instead of partially updating a zeroed 128-bit stack
+                // temporary and copying it back. Snapshot inputs before either
+                // destination store so all source/destination aliases survive.
+                put("{ uint32_t _n[4],_m[4];memcpy(_n,c->vreg["+std::to_string(rn)+
+                    "],16);memcpy(_m,c->vreg["+std::to_string(rm)+"],16);"
+                    "{uint64_t _a=_n[0],_b=_m[0],_v=0;"+EmitFPAddSubValue(false,sub)+
+                    "c->vreg["+std::to_string(rd)+"][0]=(uint32_t)_v;"
+                    "c->vreg["+std::to_string(rd)+"][1]=0;}}");
+                return true;
+            }
             put("{ "+ct+" _n["+count+"],_m["+count+"],_r["+count+"]={0};"
                 "memcpy(_n,c->vreg["+std::to_string(rn)+"],16);memcpy(_m,c->vreg["+std::to_string(rm)+"],16);");
             for(unsigned e=0;e<lanes;++e) {
